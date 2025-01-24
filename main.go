@@ -1,28 +1,38 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
-	"strconv"
-)
+	"time"
 
-const (
-	ParkingLotCapacityEnvKey      = "PARKING_LOT_CAPACITY"
-	DefaultParkingLotCapacity int = 100
+	"github.com/ilivestrong/internal/types"
 )
 
 func main() {
 
-	log.Println("Initializing Car Parking Lot system")
+	log.Println("--- Initializing Car Parking Lot system ---")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
+	defer cancel()
 
-	parkingLotCapacity := DefaultParkingLotCapacity
-	v, exists := os.LookupEnv(ParkingLotCapacityEnvKey)
-	if exists {
-		if capacity, err := strconv.Atoi(v); err != nil {
-			parkingLotCapacity = capacity
+	cmdBuilder := types.CommandBuilder{}
+
+	args := os.Args[1:]
+	fmt.Println(len(args))
+	if len(args) > 0 {
+		inputFileName := args[0]
+		commands, err := cmdBuilder.BuildCommands(ctx, inputFileName)
+		if err != nil {
+			log.Fatalf("failed to execute commands from input. Error: %v", err)
 		}
+		executeCommands(ctx, commands)
+		return
 	}
-	fmt.Println(parkingLotCapacity)
+}
 
+func executeCommands(ctx context.Context, commands []types.Commander) {
+	for _, command := range commands {
+		command.Execute(ctx)
+	}
 }

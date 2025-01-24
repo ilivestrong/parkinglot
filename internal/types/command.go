@@ -156,10 +156,12 @@ func (cb *CommandBuilder) BuildCommands(ctx context.Context, inputFileName strin
 }
 
 func (cplCmd *CreateParkingLotCommand) Execute(ctx context.Context) (interface{}, error) {
+	fmt.Printf("Created a parking lot with %d slots", cplCmd.capacity)
 	return NewParkingLot(cplCmd.capacity), nil
 }
 func (parkCmd *ParkCommand) Execute(ctx context.Context) (interface{}, error) {
 	if len(parkingLot.availableSlots) == 0 {
+		fmt.Printf("\nSorry, parking lot is full")
 		return nil, fmt.Errorf("no slots available")
 	}
 
@@ -168,7 +170,7 @@ func (parkCmd *ParkCommand) Execute(ctx context.Context) (interface{}, error) {
 	parkingLot.occupiedSlots[slot] = parkCmd.vehicle
 	parkingLot.vehicleToSlotMap[parkCmd.vehicle.registrationNumber] = slot
 	parkingLot.colorToVehicleMap[parkCmd.vehicle.color] = append(parkingLot.colorToVehicleMap[parkCmd.vehicle.color], *parkCmd.vehicle)
-	fmt.Printf("\nparked: %s at slot:{%d} available slots:%v", parkCmd.vehicle.registrationNumber, slot, parkingLot.availableSlots)
+	fmt.Printf("\nAllocated slot number: %d", slot)
 	return slot, nil
 }
 func (leaveCmd *LeaveCommand) Execute(ctx context.Context) (interface{}, error) {
@@ -194,7 +196,7 @@ func (leaveCmd *LeaveCommand) Execute(ctx context.Context) (interface{}, error) 
 	}
 
 	parkingLot.availableSlots = append(parkingLot.availableSlots[:i], append([]int{leaveCmd.slot}, parkingLot.availableSlots[i:]...)...)
-	fmt.Printf("\nleft: %d, available slots:%v", leaveCmd.slot, parkingLot.availableSlots)
+	fmt.Printf("\nSlot number %d is free", leaveCmd.slot)
 	return nil, nil
 }
 func (statusCmd *StatusCommand) Execute(ctx context.Context) (interface{}, error) {
@@ -205,9 +207,12 @@ func (statusCmd *StatusCommand) Execute(ctx context.Context) (interface{}, error
 
 	sort.Ints(slots)
 
+	// fmt.Printf("\nSlot No.\tRegistration\tNo Color")
+	fmt.Printf("\n%-10s %-20s %-10s", "Slot No.", "Registration No", "Color")
 	for _, slot := range slots {
 		vehicle := parkingLot.occupiedSlots[slot]
-		fmt.Printf("\npark: %s, %s", vehicle.registrationNumber, vehicle.color)
+		// fmt.Printf("\n%d\t%s\t%s", slot, vehicle.registrationNumber, vehicle.color)
+		fmt.Printf("\n%-10d %-20s %-10s", slot, vehicle.registrationNumber, vehicle.color)
 	}
 	return nil, nil
 }
@@ -223,7 +228,7 @@ func (qRegNoByColorCmd *QueryRegistrationNoByColorCommand) Execute(ctx context.C
 		output = append(output, vehicle.registrationNumber)
 	}
 
-	fmt.Printf("\n%s\n", strings.Join(output, ", "))
+	fmt.Printf("\n%s", strings.Join(output, ", "))
 	return nil, nil
 }
 func (qSlotNoByRegNoCmd *QuerySlotNoByRegistrationNoCommand) Execute(ctx context.Context) (interface{}, error) {

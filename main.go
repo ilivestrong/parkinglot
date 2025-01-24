@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"time"
@@ -11,15 +10,12 @@ import (
 )
 
 func main() {
-
-	log.Println("--- Initializing Car Parking Lot system ---")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
 	defer cancel()
 
 	cmdBuilder := types.CommandBuilder{}
 
 	args := os.Args[1:]
-	fmt.Println(len(args))
 	if len(args) > 0 {
 		inputFileName := args[0]
 		commands, err := cmdBuilder.BuildCommands(ctx, inputFileName)

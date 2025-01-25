@@ -20,6 +20,8 @@ const (
 	TokenForQueryRegistrationNoByColor  = "registration_numbers_for_cars_with_color"
 	TokenForQuerySlotNoByRegistrationNo = "slot_number_for_registration_number"
 	TokenForQuerySlotNoByColor          = "slot_numbers_for_cars_with_color"
+
+	MaxNumberOfSlots = 20000
 )
 
 var (
@@ -37,6 +39,7 @@ var (
 		TokenForQueryRegistrationNoByColor:  {},
 		TokenForQuerySlotNoByRegistrationNo: {},
 	}
+	newlineOrNothing = "\n"
 )
 
 type (
@@ -67,10 +70,23 @@ type (
 	CommandBuilder struct{}
 )
 
-func NewCommandBuilder() *CommandBuilder {
+/*
+Instantiates a command builder object.
+
+It allows to parse command(s) individually or in bulk.
+*/
+func NewCommandBuilder(mode string) *CommandBuilder {
+	if mode == "interactive" {
+		newlineOrNothing = ""
+	}
 	return &CommandBuilder{}
 }
 
+/*
+Parses command tokens and their args and returns a concrete Command object.
+
+The returned command object is used to execute the command on-demand.
+*/
 func (cb *CommandBuilder) ParseCommand(token string, args ...string) Commander {
 	if token == "" {
 		log.Println("token is missing")
@@ -81,9 +97,9 @@ func (cb *CommandBuilder) ParseCommand(token string, args ...string) Commander {
 		return nil
 	}
 
-	switch token {
+	switch strings.TrimSpace(token) {
 	case TokenForCreateParkingLot:
-		capacity, err := strconv.Atoi(args[0])
+		capacity, err := strconv.Atoi(strings.TrimSpace(args[0]))
 		if err != nil {
 			log.Printf("\ninvalid args provided for token: %s", token)
 		}
@@ -92,10 +108,10 @@ func (cb *CommandBuilder) ParseCommand(token string, args ...string) Commander {
 		}
 	case TokenForPark:
 		return &ParkCommand{
-			vehicle: &Vehicle{registrationNumber: args[0], color: args[1]},
+			vehicle: &Vehicle{registrationNumber: strings.TrimSpace(args[0]), color: strings.TrimSpace(args[1])},
 		}
 	case TokenForLeave:
-		slot, _ := strconv.Atoi(args[0])
+		slot, _ := strconv.Atoi(strings.TrimSpace(args[0]))
 		return &LeaveCommand{
 			slot: slot,
 		}
@@ -103,23 +119,33 @@ func (cb *CommandBuilder) ParseCommand(token string, args ...string) Commander {
 		return &StatusCommand{}
 	case TokenForQueryRegistrationNoByColor:
 		return &QueryRegistrationNoByColorCommand{
-			color: args[0],
+			color: strings.TrimSpace(args[0]),
 		}
 	case TokenForQuerySlotNoByRegistrationNo:
 		return &QuerySlotNoByRegistrationNoCommand{
-			registrationNo: args[0],
+			registrationNo: strings.TrimSpace(args[0]),
 		}
 	case TokenForQuerySlotNoByColor:
 		return &QuerySlotNoByColorCommand{
-			color: args[0],
+			color: strings.TrimSpace(args[0]),
 		}
+	case "":
+		fmt.Printf("\nno command provided \n\n")
+		return nil
 	default:
+		fmt.Printf("\n invalid command: %s, skipping...\n\n", strings.TrimSpace(token))
 		return nil
 	}
 }
 
-// reads input file in stream mode, so that large input files don't cause high memory consumption
-// based on input, constructs and return a slice of command instances, as interfaces
+/*
+Used with file based mode and accepts an input file containing command instructions.
+
+Reads input line by line (stream mode) to be memory efficient.
+Parse each token in the file and instantites a command object.
+
+Ultimately aggregates all those command instances and returns as a slice of interfaces.
+*/
 func (cb *CommandBuilder) BuildCommands(ctx context.Context, inputFileName string) ([]Commander, error) {
 	file, err := os.Open(inputFileName)
 	if err != nil {
@@ -131,20 +157,27 @@ func (cb *CommandBuilder) BuildCommands(ctx context.Context, inputFileName strin
 	scanner.Scan()
 	tokens := strings.Split(scanner.Text(), " ")
 	if tokens[0] != TokenForCreateParkingLot {
-		// Assumption: The first command must be create_parking_lot command.
-		// Without a parking lot, no command/operation would make sense
+		/*
+			Assumption: The first command must be create_parking_lot command.
+			Without a parking lot, no command/operation would make sense and allowed.
+		*/
 		log.Fatal(ErrCreateParkingLotCommandMissing) // cannot proceed, panic!
 	}
 
-	// this command only creates a ParkingLot instance to be used by other commands
-	cmd, _ := cb.ParseCommand(TokenForCreateParkingLot, tokens[1]).Execute(ctx)
-	parkingLot = cmd.(*ParkingLot)
+	// intilialise a parking lot
+	cb.ParseCommand(TokenForCreateParkingLot, tokens[1]).Execute(ctx)
+	// parkingLot = cmd.(*ParkingLot)
 
-	// all commands after 'create_parking_lot' command
+	// build rest of the commands
 	commands := make([]Commander, 0)
 	for scanner.Scan() {
 		tokens := strings.Split(scanner.Text(), " ")
-		commands = append(commands, cb.ParseCommand(tokens[0], tokens[1:]...))
+
+		cmd := cb.ParseCommand(tokens[0], tokens[1:]...)
+		if cmd == nil {
+			continue
+		}
+		commands = append(commands, cmd)
 	}
 
 	// Check for errors during scanning
@@ -156,8 +189,13 @@ func (cb *CommandBuilder) BuildCommands(ctx context.Context, inputFileName strin
 }
 
 func (cplCmd *CreateParkingLotCommand) Execute(ctx context.Context) (interface{}, error) {
+	if cplCmd.capacity > MaxNumberOfSlots {
+		fmt.Printf("cannot create :%d slots. Maximum allowed is: %d", cplCmd.capacity, MaxNumberOfSlots)
+		return nil, nil
+	}
 	fmt.Printf("Created a parking lot with %d slots", cplCmd.capacity)
-	return NewParkingLot(cplCmd.capacity), nil
+	parkingLot = NewParkingLot(cplCmd.capacity)
+	return nil, nil
 }
 func (parkCmd *ParkCommand) Execute(ctx context.Context) (interface{}, error) {
 	if len(parkingLot.availableSlots) == 0 {
@@ -170,11 +208,15 @@ func (parkCmd *ParkCommand) Execute(ctx context.Context) (interface{}, error) {
 	parkingLot.occupiedSlots[slot] = parkCmd.vehicle
 	parkingLot.vehicleToSlotMap[parkCmd.vehicle.registrationNumber] = slot
 	parkingLot.colorToVehicleMap[parkCmd.vehicle.color] = append(parkingLot.colorToVehicleMap[parkCmd.vehicle.color], *parkCmd.vehicle)
-	fmt.Printf("\nAllocated slot number: %d", slot)
+	fmt.Printf(newlineOrNothing+"Allocated slot number: %d", slot)
 	return slot, nil
 }
 func (leaveCmd *LeaveCommand) Execute(ctx context.Context) (interface{}, error) {
-	vehicle := parkingLot.occupiedSlots[leaveCmd.slot]
+	vehicle, exists := parkingLot.occupiedSlots[leaveCmd.slot]
+	if !exists {
+		fmt.Printf("slot %d is not occupied", leaveCmd.slot)
+		return nil, nil
+	}
 
 	delete(parkingLot.occupiedSlots, leaveCmd.slot)
 	delete(parkingLot.vehicleToSlotMap, vehicle.registrationNumber)
@@ -207,17 +249,16 @@ func (statusCmd *StatusCommand) Execute(ctx context.Context) (interface{}, error
 
 	sort.Ints(slots)
 
-	// fmt.Printf("\nSlot No.\tRegistration\tNo Color")
 	fmt.Printf("\n%-10s %-20s %-10s", "Slot No.", "Registration No", "Color")
 	for _, slot := range slots {
 		vehicle := parkingLot.occupiedSlots[slot]
-		// fmt.Printf("\n%d\t%s\t%s", slot, vehicle.registrationNumber, vehicle.color)
 		fmt.Printf("\n%-10d %-20s %-10s", slot, vehicle.registrationNumber, vehicle.color)
 	}
 	return nil, nil
 }
 func (qRegNoByColorCmd *QueryRegistrationNoByColorCommand) Execute(ctx context.Context) (interface{}, error) {
 	vehicles, ok := parkingLot.colorToVehicleMap[qRegNoByColorCmd.color]
+	// fmt.Println(qRegNoByColorCmd.color, vehicles)
 	if !ok {
 		fmt.Println("Not found")
 		return nil, nil
@@ -241,7 +282,6 @@ func (qSlotNoByRegNoCmd *QuerySlotNoByRegistrationNoCommand) Execute(ctx context
 	fmt.Println(slot)
 	return nil, nil
 }
-
 func (qSlotNoByColorCmd *QuerySlotNoByColorCommand) Execute(ctx context.Context) (interface{}, error) {
 	vehicles, exists := parkingLot.colorToVehicleMap[qSlotNoByColorCmd.color]
 	if !exists {

@@ -1,4 +1,4 @@
-package types
+package lib
 
 import (
 	"bufio"
@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	pm "github.com/ilivestrong/internal/types/parking_manager"
+	pm "github.com/ilivestrong/internal/lib/parking_manager"
 )
 
 const (
@@ -51,25 +51,35 @@ type (
 
 	CreateParkingLotCommand struct {
 		capacity int
+		owriter  *bufio.Writer
 	}
 	ParkCommand struct {
 		vehicle *pm.Vehicle
+		owriter *bufio.Writer
 	}
 	LeaveCommand struct {
-		slot int
+		slot    int
+		owriter *bufio.Writer
 	}
-	StatusCommand                     struct{}
+	StatusCommand struct {
+		owriter *bufio.Writer
+	}
 	QueryRegistrationNoByColorCommand struct {
-		color string
+		color   string
+		owriter *bufio.Writer
 	}
 	QuerySlotNoByRegistrationNoCommand struct {
 		registrationNo string
+		owriter        *bufio.Writer
 	}
 	QuerySlotNoByColorCommand struct {
-		color string
+		color   string
+		owriter *bufio.Writer
 	}
 
-	CommandBuilder struct{}
+	CommandBuilder struct {
+		owriter *bufio.Writer
+	}
 )
 
 /*
@@ -77,11 +87,11 @@ Instantiates a command builder object.
 
 It allows to parse command(s) individually or in bulk.
 */
-func NewCommandBuilder(mode string) *CommandBuilder {
+func NewCommandBuilder(mode string, oWriter *bufio.Writer) *CommandBuilder {
 	if mode == "interactive" {
 		newlineOrNothing = ""
 	}
-	return &CommandBuilder{}
+	return &CommandBuilder{owriter: oWriter}
 }
 
 /*
@@ -91,7 +101,7 @@ The returned command object is used to execute the command on-demand.
 */
 func (cb *CommandBuilder) ParseCommand(commandName string, args ...string) Commander {
 	if _, ok := commandsWithArgs[commandName]; ok && len(args) == 0 {
-		log.Printf("\nargs missing for command: %s", commandName)
+		writeToOutput(cb.owriter, fmt.Sprintf("\nargs missing for command: %s", commandName))
 		return nil
 	}
 
@@ -99,39 +109,45 @@ func (cb *CommandBuilder) ParseCommand(commandName string, args ...string) Comma
 	case TokenForCreateParkingLot:
 		capacity, err := strconv.Atoi(args[0])
 		if err != nil {
-			log.Printf("\ninvalid args provided for command: %s", commandName)
+			writeToOutput(cb.owriter, fmt.Sprintf("\ninvalid args provided for command: %s", commandName))
 		}
 		return &CreateParkingLotCommand{
 			capacity: capacity,
+			owriter:  cb.owriter,
 		}
 	case TokenForPark:
 		return &ParkCommand{
 			vehicle: pm.NewVehicle(args[0], args[1]),
+			owriter: cb.owriter,
 		}
 	case TokenForLeave:
 		slot, _ := strconv.Atoi(args[0])
 		return &LeaveCommand{
-			slot: slot,
+			slot:    slot,
+			owriter: cb.owriter,
 		}
 	case TokenForStatus:
-		return &StatusCommand{}
+		return &StatusCommand{owriter: cb.owriter}
 	case TokenForQueryRegistrationNoByColor:
 		return &QueryRegistrationNoByColorCommand{
-			color: args[0],
+			color:   args[0],
+			owriter: cb.owriter,
 		}
 	case TokenForQuerySlotNoByRegistrationNo:
 		return &QuerySlotNoByRegistrationNoCommand{
 			registrationNo: args[0],
+			owriter:        cb.owriter,
 		}
 	case TokenForQuerySlotNoByColor:
 		return &QuerySlotNoByColorCommand{
-			color: args[0],
+			color:   args[0],
+			owriter: cb.owriter,
 		}
 	case "":
-		fmt.Printf("\nno command provided \n\n")
+		writeToOutput(cb.owriter, "\nno command provided \n\n")
 		return nil
 	default:
-		fmt.Printf("\n invalid command: %s, skipping...\n\n", commandName)
+		writeToOutput(cb.owriter, fmt.Sprintf("\n invalid command: %s, skipping...\n\n", commandName))
 		return nil
 	}
 }
@@ -188,21 +204,21 @@ func (cb *CommandBuilder) BuildCommands(ctx context.Context, inputFileName strin
 
 func (cplCmd *CreateParkingLotCommand) Execute(ctx context.Context) {
 	if cplCmd.capacity > MaxNumberOfSlots {
-		fmt.Printf("cannot create :%d slots. Maximum allowed is: %d", cplCmd.capacity, MaxNumberOfSlots)
+		writeToOutput(cplCmd.owriter, fmt.Sprintf("cannot create :%d slots. Maximum allowed is: %d", cplCmd.capacity, MaxNumberOfSlots))
 		return
 	}
 
 	if cplCmd.capacity <= 0 {
-		fmt.Printf("invalid slot number: %d", cplCmd.capacity)
+		writeToOutput(cplCmd.owriter, fmt.Sprintf("invalid slot number: %d", cplCmd.capacity))
 		return
 	}
 
-	fmt.Printf("Created a parking lot with %d slots", cplCmd.capacity)
+	writeToOutput(cplCmd.owriter, fmt.Sprintf("Created a parking lot with %d slots", cplCmd.capacity))
 	parkingLot = pm.NewParkingLot(cplCmd.capacity)
 }
 func (parkCmd *ParkCommand) Execute(ctx context.Context) {
 	if len(parkingLot.GetAvailableSlots()) == 0 {
-		fmt.Printf("%s", newlineOrNothing+"Sorry, parking lot is full")
+		writeToOutput(parkCmd.owriter, newlineOrNothing+"Sorry, parking lot is full")
 		return
 	}
 
@@ -212,13 +228,13 @@ func (parkCmd *ParkCommand) Execute(ctx context.Context) {
 	parkingLot.UpdateSlotByRegistrationNo(parkCmd.vehicle.GetRegistrationNo(), slot)
 	parkingLot.UpdateVehiclesByColor(parkCmd.vehicle.GetColor(), parkCmd.vehicle)
 
-	fmt.Printf(newlineOrNothing+"Allocated slot number: %d", slot)
+	writeToOutput(parkCmd.owriter, fmt.Sprintf(newlineOrNothing+"Allocated slot number: %d", slot))
 }
 
 func (leaveCmd *LeaveCommand) Execute(ctx context.Context) {
 	vehicle, exists := parkingLot.GetOccupiedSlots()[leaveCmd.slot]
 	if !exists {
-		fmt.Printf("slot %d is not occupied", leaveCmd.slot)
+		writeToOutput(leaveCmd.owriter, fmt.Sprintf("slot %d is not occupied", leaveCmd.slot))
 		return
 	}
 
@@ -235,26 +251,26 @@ func (leaveCmd *LeaveCommand) Execute(ctx context.Context) {
 	updatedAvailableSlots := append(parkingLot.GetAvailableSlots()[:i], append([]int{leaveCmd.slot}, parkingLot.GetAvailableSlots()[i:]...)...)
 	parkingLot.UpdateAvailableSlots(updatedAvailableSlots)
 
-	fmt.Printf(newlineOrNothing+"Slot number %d is free", leaveCmd.slot)
+	writeToOutput(leaveCmd.owriter, fmt.Sprintf(newlineOrNothing+"Slot number %d is free", leaveCmd.slot))
 }
 func (statusCmd *StatusCommand) Execute(ctx context.Context) {
 	slots := make([]int, 0, len(parkingLot.GetOccupiedSlots()))
-	for slot, _ := range parkingLot.GetOccupiedSlots() {
+	for slot := range parkingLot.GetOccupiedSlots() {
 		slots = append(slots, slot)
 	}
 
 	sort.Ints(slots)
 
-	fmt.Printf(newlineOrNothing+"%-10s %-20s %-10s", "Slot No.", "Registration No", "Color")
+	writeToOutput(statusCmd.owriter, fmt.Sprintf(newlineOrNothing+"%-10s %-20s %-10s", "Slot No.", "Registration No", "Color"))
 	for _, slot := range slots {
 		vehicle := parkingLot.GetOccupiedSlots()[slot]
-		fmt.Printf("\n%-10d %-20s %-10s", slot, vehicle.GetRegistrationNo(), vehicle.GetColor())
+		writeToOutput(statusCmd.owriter, fmt.Sprintf("\n%-10d %-20s %-10s", slot, vehicle.GetRegistrationNo(), vehicle.GetColor()))
 	}
 }
 func (qRegNoByColorCmd *QueryRegistrationNoByColorCommand) Execute(ctx context.Context) {
 	vehicles, ok := parkingLot.GetVehiclesByColor(qRegNoByColorCmd.color)
 	if !ok {
-		fmt.Println("Not found")
+		writeToOutput(qRegNoByColorCmd.owriter, "Not found")
 		return
 	}
 
@@ -263,21 +279,21 @@ func (qRegNoByColorCmd *QueryRegistrationNoByColorCommand) Execute(ctx context.C
 		output = append(output, vehicle.GetRegistrationNo())
 	}
 
-	fmt.Printf(newlineOrNothing+"%s", strings.Join(output, ", "))
+	writeToOutput(qRegNoByColorCmd.owriter, fmt.Sprintf(newlineOrNothing+"%s", strings.Join(output, ", ")))
 }
 func (qSlotNoByRegNoCmd *QuerySlotNoByRegistrationNoCommand) Execute(ctx context.Context) {
 	slot, exists := parkingLot.GetSlotByRegistrationNo(qSlotNoByRegNoCmd.registrationNo)
 	if !exists {
-		fmt.Printf("%s", "Not found"+newlineOrNothing)
+		writeToOutput(qSlotNoByRegNoCmd.owriter, "Not found"+newlineOrNothing)
 		return
 	}
 
-	fmt.Println(slot)
+	writeToOutput(qSlotNoByRegNoCmd.owriter, fmt.Sprintf("%d\n", slot))
 }
 func (qSlotNoByColorCmd *QuerySlotNoByColorCommand) Execute(ctx context.Context) {
 	vehicles, exists := parkingLot.GetVehiclesByColor(qSlotNoByColorCmd.color)
 	if !exists {
-		fmt.Printf("%s", "Not found"+newlineOrNothing)
+		writeToOutput(qSlotNoByColorCmd.owriter, "Not found"+newlineOrNothing)
 		return
 	}
 
@@ -288,5 +304,10 @@ func (qSlotNoByColorCmd *QuerySlotNoByColorCommand) Execute(ctx context.Context)
 		}
 	}
 
-	fmt.Printf(newlineOrNothing+"%s\n", strings.Join(slots, ", "))
+	writeToOutput(qSlotNoByColorCmd.owriter, fmt.Sprintf(newlineOrNothing+"%s\n", strings.Join(slots, ", ")))
+}
+
+func writeToOutput(writer *bufio.Writer, message string) {
+	fmt.Fprintf(writer, "%s", message)
+	writer.Flush()
 }

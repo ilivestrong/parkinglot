@@ -4,12 +4,13 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/ilivestrong/internal/types"
+	"github.com/ilivestrong/internal/lib"
 )
 
 const (
@@ -24,14 +25,17 @@ func main() {
 
 	if len(os.Args) > 1 {
 		inputFileName := os.Args[1]
-		runFileBasedMode(ctx, inputFileName)
+		runFileBasedMode(ctx, inputFileName, os.Stdout)
 	} else {
-		runInteractiveMode(ctx)
+		runInteractiveMode(ctx, os.Stdin, os.Stdout)
 	}
 }
 
-func runFileBasedMode(ctx context.Context, inputFileName string) {
-	cmdBuilder := types.NewCommandBuilder(ModeFileBased)
+func runFileBasedMode(ctx context.Context, inputFileName string, output io.Writer) {
+	writer := bufio.NewWriter(output)
+	defer writer.Flush()
+
+	cmdBuilder := lib.NewCommandBuilder(ModeFileBased, writer)
 	commands, err := cmdBuilder.BuildCommands(ctx, inputFileName)
 	if err != nil {
 		log.Fatalf("failed to execute commands from input. Error: %v", err)
@@ -39,16 +43,19 @@ func runFileBasedMode(ctx context.Context, inputFileName string) {
 	executeCommands(ctx, commands)
 }
 
-func runInteractiveMode(ctx context.Context) {
-	cmdBuilder := types.NewCommandBuilder(ModeInteractive)
-	reader := bufio.NewReader(os.Stdin)
+func runInteractiveMode(ctx context.Context, input io.Reader, output io.Writer) {
+	reader := bufio.NewReader(input)
+	writer := bufio.NewWriter(output)
+	defer writer.Flush()
+
+	cmdBuilder := lib.NewCommandBuilder(ModeInteractive, writer)
 
 	parkingLotCreated := false
 	for {
 		input, _ := reader.ReadString('\n')
 		commandName, args := tokenize(input)
 		if commandName == "" {
-			fmt.Println("invalid command.....")
+			writeToOutput(writer, "invalid command.....")
 			continue
 		}
 
@@ -61,10 +68,10 @@ func runInteractiveMode(ctx context.Context) {
 			continue
 		}
 
-		if commandName == types.TokenForCreateParkingLot {
+		if commandName == lib.TokenForCreateParkingLot {
 			parkingLotCreated = true
 		} else if !parkingLotCreated {
-			fmt.Printf("\nPlease create a parking lot first\n\n")
+			writeToOutput(writer, "\nPlease create a parking lot first\n\n")
 			continue
 		}
 
@@ -73,7 +80,7 @@ func runInteractiveMode(ctx context.Context) {
 	}
 }
 
-func executeCommands(ctx context.Context, commands []types.Commander) {
+func executeCommands(ctx context.Context, commands []lib.Commander) {
 	for _, command := range commands {
 		command.Execute(ctx)
 	}
@@ -86,4 +93,9 @@ func tokenize(input string) (string, []string) {
 	}
 	tokens := strings.Fields(input)
 	return tokens[0], tokens[1:]
+}
+
+func writeToOutput(writer *bufio.Writer, message string) {
+	fmt.Fprintf(writer, "%s", message)
+	writer.Flush()
 }

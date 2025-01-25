@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	pm "github.com/ilivestrong/internal/types/parking_manager"
 )
 
 const (
@@ -31,7 +33,7 @@ var (
 )
 
 var (
-	parkingLot       *ParkingLot
+	parkingLot       *pm.ParkingLot
 	commandsWithArgs map[string]struct{} = map[string]struct{}{
 		TokenForCreateParkingLot:            {},
 		TokenForPark:                        {},
@@ -44,14 +46,14 @@ var (
 
 type (
 	Commander interface {
-		Execute(ctx context.Context) (interface{}, error)
+		Execute(ctx context.Context)
 	}
 
 	CreateParkingLotCommand struct {
 		capacity int
 	}
 	ParkCommand struct {
-		vehicle *Vehicle
+		vehicle *pm.Vehicle
 	}
 	LeaveCommand struct {
 		slot int
@@ -104,7 +106,7 @@ func (cb *CommandBuilder) ParseCommand(commandName string, args ...string) Comma
 		}
 	case TokenForPark:
 		return &ParkCommand{
-			vehicle: &Vehicle{registrationNumber: args[0], color: args[1]},
+			vehicle: pm.NewVehicle(args[0], args[1]),
 		}
 	case TokenForLeave:
 		slot, _ := strconv.Atoi(args[0])
@@ -184,62 +186,60 @@ func (cb *CommandBuilder) BuildCommands(ctx context.Context, inputFileName strin
 	return commands, nil
 }
 
-func (cplCmd *CreateParkingLotCommand) Execute(ctx context.Context) (interface{}, error) {
+func (cplCmd *CreateParkingLotCommand) Execute(ctx context.Context) {
 	if cplCmd.capacity > MaxNumberOfSlots {
 		fmt.Printf("cannot create :%d slots. Maximum allowed is: %d", cplCmd.capacity, MaxNumberOfSlots)
-		return nil, nil
-	}
-	fmt.Printf("Created a parking lot with %d slots", cplCmd.capacity)
-	parkingLot = NewParkingLot(cplCmd.capacity)
-	return nil, nil
-}
-func (parkCmd *ParkCommand) Execute(ctx context.Context) (interface{}, error) {
-	if len(parkingLot.availableSlots) == 0 {
-		fmt.Printf(newlineOrNothing + "Sorry, parking lot is full")
-		return nil, fmt.Errorf("no slots available")
+		return
 	}
 
-	slot := int(parkingLot.availableSlots[0])
-	parkingLot.availableSlots = parkingLot.availableSlots[1:]
-	parkingLot.occupiedSlots[slot] = parkCmd.vehicle
-	parkingLot.vehicleToSlotMap[parkCmd.vehicle.registrationNumber] = slot
-	parkingLot.colorToVehicleMap[parkCmd.vehicle.color] = append(parkingLot.colorToVehicleMap[parkCmd.vehicle.color], *parkCmd.vehicle)
-	fmt.Printf(newlineOrNothing+"Allocated slot number: %d", slot)
-	return slot, nil
+	if cplCmd.capacity <= 0 {
+		fmt.Printf("invalid slot number: %d", cplCmd.capacity)
+		return
+	}
+
+	fmt.Printf("Created a parking lot with %d slots", cplCmd.capacity)
+	parkingLot = pm.NewParkingLot(cplCmd.capacity)
 }
-func (leaveCmd *LeaveCommand) Execute(ctx context.Context) (interface{}, error) {
-	vehicle, exists := parkingLot.occupiedSlots[leaveCmd.slot]
+func (parkCmd *ParkCommand) Execute(ctx context.Context) {
+	if len(parkingLot.GetAvailableSlots()) == 0 {
+		fmt.Printf("%s", newlineOrNothing+"Sorry, parking lot is full")
+		return
+	}
+
+	slot := int(parkingLot.GetAvailableSlots()[0])
+	parkingLot.UpdateAvailableSlots(parkingLot.GetAvailableSlots()[1:])
+	parkingLot.UpdateOccupiedSlot(slot, parkCmd.vehicle)
+	parkingLot.UpdateSlotByRegistrationNo(parkCmd.vehicle.GetRegistrationNo(), slot)
+	parkingLot.UpdateVehiclesByColor(parkCmd.vehicle.GetColor(), parkCmd.vehicle)
+
+	fmt.Printf(newlineOrNothing+"Allocated slot number: %d", slot)
+}
+
+func (leaveCmd *LeaveCommand) Execute(ctx context.Context) {
+	vehicle, exists := parkingLot.GetOccupiedSlots()[leaveCmd.slot]
 	if !exists {
 		fmt.Printf("slot %d is not occupied", leaveCmd.slot)
-		return nil, nil
+		return
 	}
 
-	delete(parkingLot.occupiedSlots, leaveCmd.slot)
-	delete(parkingLot.vehicleToSlotMap, vehicle.registrationNumber)
-
-	// Remove vehicle from colorToVehicles map
-	for color, vehicles := range parkingLot.colorToVehicleMap {
-		for i, v := range vehicles {
-			if v.registrationNumber == vehicle.registrationNumber {
-				parkingLot.colorToVehicleMap[color] = append(vehicles[:i], vehicles[i+1:]...)
-				break
-			}
-		}
-	}
+	parkingLot.RemoveSlotFromOccupiedSlots(leaveCmd.slot)
+	parkingLot.RemoveRegistrationNoFromOccupiedSlots(vehicle.GetRegistrationNo())
+	parkingLot.RemoveVehicleFromColorToVehicleMapping(vehicle)
 
 	// sync the slots - in order
 	i := 0
-	for i < len(parkingLot.availableSlots) && parkingLot.availableSlots[i] < leaveCmd.slot {
+	for i < len(parkingLot.GetAvailableSlots()) && parkingLot.GetAvailableSlots()[i] < leaveCmd.slot {
 		i++
 	}
 
-	parkingLot.availableSlots = append(parkingLot.availableSlots[:i], append([]int{leaveCmd.slot}, parkingLot.availableSlots[i:]...)...)
+	updatedAvailableSlots := append(parkingLot.GetAvailableSlots()[:i], append([]int{leaveCmd.slot}, parkingLot.GetAvailableSlots()[i:]...)...)
+	parkingLot.UpdateAvailableSlots(updatedAvailableSlots)
+
 	fmt.Printf(newlineOrNothing+"Slot number %d is free", leaveCmd.slot)
-	return nil, nil
 }
-func (statusCmd *StatusCommand) Execute(ctx context.Context) (interface{}, error) {
-	slots := make([]int, 0, len(parkingLot.occupiedSlots))
-	for slot, _ := range parkingLot.occupiedSlots {
+func (statusCmd *StatusCommand) Execute(ctx context.Context) {
+	slots := make([]int, 0, len(parkingLot.GetOccupiedSlots()))
+	for slot, _ := range parkingLot.GetOccupiedSlots() {
 		slots = append(slots, slot)
 	}
 
@@ -247,51 +247,46 @@ func (statusCmd *StatusCommand) Execute(ctx context.Context) (interface{}, error
 
 	fmt.Printf(newlineOrNothing+"%-10s %-20s %-10s", "Slot No.", "Registration No", "Color")
 	for _, slot := range slots {
-		vehicle := parkingLot.occupiedSlots[slot]
-		fmt.Printf("\n%-10d %-20s %-10s", slot, vehicle.registrationNumber, vehicle.color)
+		vehicle := parkingLot.GetOccupiedSlots()[slot]
+		fmt.Printf("\n%-10d %-20s %-10s", slot, vehicle.GetRegistrationNo(), vehicle.GetColor())
 	}
-	return nil, nil
 }
-func (qRegNoByColorCmd *QueryRegistrationNoByColorCommand) Execute(ctx context.Context) (interface{}, error) {
-	vehicles, ok := parkingLot.colorToVehicleMap[qRegNoByColorCmd.color]
-	// fmt.Println(qRegNoByColorCmd.color, vehicles)
+func (qRegNoByColorCmd *QueryRegistrationNoByColorCommand) Execute(ctx context.Context) {
+	vehicles, ok := parkingLot.GetVehiclesByColor(qRegNoByColorCmd.color)
 	if !ok {
 		fmt.Println("Not found")
-		return nil, nil
+		return
 	}
 
 	output := make([]string, 0)
 	for _, vehicle := range vehicles {
-		output = append(output, vehicle.registrationNumber)
+		output = append(output, vehicle.GetRegistrationNo())
 	}
 
 	fmt.Printf(newlineOrNothing+"%s", strings.Join(output, ", "))
-	return nil, nil
 }
-func (qSlotNoByRegNoCmd *QuerySlotNoByRegistrationNoCommand) Execute(ctx context.Context) (interface{}, error) {
-	slot, exists := parkingLot.vehicleToSlotMap[qSlotNoByRegNoCmd.registrationNo]
+func (qSlotNoByRegNoCmd *QuerySlotNoByRegistrationNoCommand) Execute(ctx context.Context) {
+	slot, exists := parkingLot.GetSlotByRegistrationNo(qSlotNoByRegNoCmd.registrationNo)
 	if !exists {
 		fmt.Printf("%s", "Not found"+newlineOrNothing)
-		return nil, nil
+		return
 	}
 
 	fmt.Println(slot)
-	return nil, nil
 }
-func (qSlotNoByColorCmd *QuerySlotNoByColorCommand) Execute(ctx context.Context) (interface{}, error) {
-	vehicles, exists := parkingLot.colorToVehicleMap[qSlotNoByColorCmd.color]
+func (qSlotNoByColorCmd *QuerySlotNoByColorCommand) Execute(ctx context.Context) {
+	vehicles, exists := parkingLot.GetVehiclesByColor(qSlotNoByColorCmd.color)
 	if !exists {
 		fmt.Printf("%s", "Not found"+newlineOrNothing)
-		return nil, nil
+		return
 	}
 
 	slots := []string{}
 	for _, vehicle := range vehicles {
-		if slot, exists := parkingLot.vehicleToSlotMap[vehicle.registrationNumber]; exists {
+		if slot, exists := parkingLot.GetSlotByRegistrationNo(vehicle.GetRegistrationNo()); exists {
 			slots = append(slots, fmt.Sprintf("%d", slot))
 		}
 	}
 
 	fmt.Printf(newlineOrNothing+"%s\n", strings.Join(slots, ", "))
-	return nil, nil
 }

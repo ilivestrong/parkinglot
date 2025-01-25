@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"strings"
 	"time"
@@ -38,7 +37,7 @@ func runFileBasedMode(ctx context.Context, inputFileName string, output io.Write
 	cmdBuilder := lib.NewCommandBuilder(ModeFileBased, writer)
 	commands, err := cmdBuilder.BuildCommands(ctx, inputFileName)
 	if err != nil {
-		log.Fatalf("failed to execute commands from input. Error: %v", err)
+		return
 	}
 	executeCommands(ctx, commands)
 }
@@ -55,7 +54,7 @@ func runInteractiveMode(ctx context.Context, input io.Reader, output io.Writer) 
 		input, _ := reader.ReadString('\n')
 		commandName, args := tokenize(input)
 		if commandName == "" {
-			writeToOutput(writer, "invalid command.....")
+			writeToOutput(writer, "invalid command.....\n")
 			continue
 		}
 
@@ -75,7 +74,9 @@ func runInteractiveMode(ctx context.Context, input io.Reader, output io.Writer) 
 			continue
 		}
 
-		cmd.Execute(ctx)
+		if err := cmd.Execute(ctx); err != nil {
+			return
+		}
 		fmt.Printf("\n\n")
 	}
 }

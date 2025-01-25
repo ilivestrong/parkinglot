@@ -30,23 +30,24 @@ var (
 	ErrCreateParkingLotCommandMissing = errors.New("invalid input file, require 'create_parking_lot' as the first command")
 	ErrInvalidCreateParkingLotCommand = errors.New("invalid 'create_parking_lot' command")
 	ErrInvalidInputFile               = errors.New("invalid input file")
+	ErrMaxSlotExceeded                = fmt.Errorf("max slots available: %d", MaxNumberOfSlots)
 )
 
 var (
 	parkingLot       *pm.ParkingLot
-	commandsWithArgs map[string]struct{} = map[string]struct{}{
-		TokenForCreateParkingLot:            {},
-		TokenForPark:                        {},
-		TokenForLeave:                       {},
-		TokenForQueryRegistrationNoByColor:  {},
-		TokenForQuerySlotNoByRegistrationNo: {},
+	commandsWithArgs map[string]int = map[string]int{
+		TokenForCreateParkingLot:            1,
+		TokenForPark:                        2,
+		TokenForLeave:                       1,
+		TokenForQueryRegistrationNoByColor:  1,
+		TokenForQuerySlotNoByRegistrationNo: 1,
 	}
 	newlineOrNothing = "\n"
 )
 
 type (
 	Commander interface {
-		Execute(ctx context.Context)
+		Execute(ctx context.Context) error
 	}
 
 	CreateParkingLotCommand struct {
@@ -100,8 +101,8 @@ Parses command tokens and their args and returns a concrete Command object.
 The returned command object is used to execute the command on-demand.
 */
 func (cb *CommandBuilder) ParseCommand(commandName string, args ...string) Commander {
-	if _, ok := commandsWithArgs[commandName]; ok && len(args) == 0 {
-		writeToOutput(cb.owriter, fmt.Sprintf("\nargs missing for command: %s", commandName))
+	if argsCount, ok := commandsWithArgs[commandName]; ok && commandName != "" && len(args) < argsCount {
+		writeToOutput(cb.owriter, fmt.Sprintf("\nargs missing for command: %s\n", commandName))
 		return nil
 	}
 
@@ -179,8 +180,10 @@ func (cb *CommandBuilder) BuildCommands(ctx context.Context, inputFileName strin
 	}
 
 	// intilialise a parking lot
-	cb.ParseCommand(TokenForCreateParkingLot, tokens[1]).Execute(ctx)
-	// parkingLot = cmd.(*ParkingLot)
+	err = cb.ParseCommand(TokenForCreateParkingLot, tokens[1]).Execute(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	// build rest of the commands
 	commands := make([]Commander, 0)
@@ -202,24 +205,30 @@ func (cb *CommandBuilder) BuildCommands(ctx context.Context, inputFileName strin
 	return commands, nil
 }
 
-func (cplCmd *CreateParkingLotCommand) Execute(ctx context.Context) {
+func (cplCmd *CreateParkingLotCommand) Execute(ctx context.Context) error {
 	if cplCmd.capacity > MaxNumberOfSlots {
-		writeToOutput(cplCmd.owriter, fmt.Sprintf("cannot create :%d slots. Maximum allowed is: %d", cplCmd.capacity, MaxNumberOfSlots))
-		return
+		writeToOutput(cplCmd.owriter, fmt.Sprintf("cannot create :%d slots. %s", cplCmd.capacity, ErrMaxSlotExceeded.Error()))
+
+		/*
+			we want to propagate this error up, as we want to exit gracefully in FileMode.
+			As we don't have an option (like in interactive mode) to fix what's inside the input file at runtime
+		*/
+		return ErrMaxSlotExceeded
 	}
 
 	if cplCmd.capacity <= 0 {
 		writeToOutput(cplCmd.owriter, fmt.Sprintf("invalid slot number: %d", cplCmd.capacity))
-		return
+		return nil
 	}
 
 	writeToOutput(cplCmd.owriter, fmt.Sprintf("Created a parking lot with %d slots", cplCmd.capacity))
 	parkingLot = pm.NewParkingLot(cplCmd.capacity)
+	return nil
 }
-func (parkCmd *ParkCommand) Execute(ctx context.Context) {
+func (parkCmd *ParkCommand) Execute(ctx context.Context) error {
 	if len(parkingLot.GetAvailableSlots()) == 0 {
 		writeToOutput(parkCmd.owriter, newlineOrNothing+"Sorry, parking lot is full")
-		return
+		return nil
 	}
 
 	slot := int(parkingLot.GetAvailableSlots()[0])
@@ -229,13 +238,14 @@ func (parkCmd *ParkCommand) Execute(ctx context.Context) {
 	parkingLot.UpdateVehiclesByColor(parkCmd.vehicle.GetColor(), parkCmd.vehicle)
 
 	writeToOutput(parkCmd.owriter, fmt.Sprintf(newlineOrNothing+"Allocated slot number: %d", slot))
+	return nil
 }
 
-func (leaveCmd *LeaveCommand) Execute(ctx context.Context) {
+func (leaveCmd *LeaveCommand) Execute(ctx context.Context) error {
 	vehicle, exists := parkingLot.GetOccupiedSlots()[leaveCmd.slot]
 	if !exists {
 		writeToOutput(leaveCmd.owriter, fmt.Sprintf("slot %d is not occupied", leaveCmd.slot))
-		return
+		return nil
 	}
 
 	parkingLot.RemoveSlotFromOccupiedSlots(leaveCmd.slot)
@@ -252,8 +262,9 @@ func (leaveCmd *LeaveCommand) Execute(ctx context.Context) {
 	parkingLot.UpdateAvailableSlots(updatedAvailableSlots)
 
 	writeToOutput(leaveCmd.owriter, fmt.Sprintf(newlineOrNothing+"Slot number %d is free", leaveCmd.slot))
+	return nil
 }
-func (statusCmd *StatusCommand) Execute(ctx context.Context) {
+func (statusCmd *StatusCommand) Execute(ctx context.Context) error {
 	slots := make([]int, 0, len(parkingLot.GetOccupiedSlots()))
 	for slot := range parkingLot.GetOccupiedSlots() {
 		slots = append(slots, slot)
@@ -266,12 +277,13 @@ func (statusCmd *StatusCommand) Execute(ctx context.Context) {
 		vehicle := parkingLot.GetOccupiedSlots()[slot]
 		writeToOutput(statusCmd.owriter, fmt.Sprintf("\n%-10d %-20s %-10s", slot, vehicle.GetRegistrationNo(), vehicle.GetColor()))
 	}
+	return nil
 }
-func (qRegNoByColorCmd *QueryRegistrationNoByColorCommand) Execute(ctx context.Context) {
+func (qRegNoByColorCmd *QueryRegistrationNoByColorCommand) Execute(ctx context.Context) error {
 	vehicles, ok := parkingLot.GetVehiclesByColor(qRegNoByColorCmd.color)
 	if !ok {
 		writeToOutput(qRegNoByColorCmd.owriter, "Not found")
-		return
+		return nil
 	}
 
 	output := make([]string, 0)
@@ -280,21 +292,23 @@ func (qRegNoByColorCmd *QueryRegistrationNoByColorCommand) Execute(ctx context.C
 	}
 
 	writeToOutput(qRegNoByColorCmd.owriter, fmt.Sprintf(newlineOrNothing+"%s", strings.Join(output, ", ")))
+	return nil
 }
-func (qSlotNoByRegNoCmd *QuerySlotNoByRegistrationNoCommand) Execute(ctx context.Context) {
+func (qSlotNoByRegNoCmd *QuerySlotNoByRegistrationNoCommand) Execute(ctx context.Context) error {
 	slot, exists := parkingLot.GetSlotByRegistrationNo(qSlotNoByRegNoCmd.registrationNo)
 	if !exists {
 		writeToOutput(qSlotNoByRegNoCmd.owriter, "Not found"+newlineOrNothing)
-		return
+		return nil
 	}
 
 	writeToOutput(qSlotNoByRegNoCmd.owriter, fmt.Sprintf("%d\n", slot))
+	return nil
 }
-func (qSlotNoByColorCmd *QuerySlotNoByColorCommand) Execute(ctx context.Context) {
+func (qSlotNoByColorCmd *QuerySlotNoByColorCommand) Execute(ctx context.Context) error {
 	vehicles, exists := parkingLot.GetVehiclesByColor(qSlotNoByColorCmd.color)
 	if !exists {
 		writeToOutput(qSlotNoByColorCmd.owriter, "Not found"+newlineOrNothing)
-		return
+		return nil
 	}
 
 	slots := []string{}
@@ -305,6 +319,7 @@ func (qSlotNoByColorCmd *QuerySlotNoByColorCommand) Execute(ctx context.Context)
 	}
 
 	writeToOutput(qSlotNoByColorCmd.owriter, fmt.Sprintf(newlineOrNothing+"%s\n", strings.Join(slots, ", ")))
+	return nil
 }
 
 func writeToOutput(writer *bufio.Writer, message string) {

@@ -2,10 +2,8 @@ package types
 
 type (
 	ParkingLot struct {
-		capacity       uint32
-		availableSlots []int
-
-		// O(1) constant time access
+		capacity          int
+		availableSlots    []int
 		occupiedSlots     map[int]*Vehicle
 		vehicleToSlotMap  map[string]int
 		colorToVehicleMap map[string][]Vehicle
@@ -24,7 +22,7 @@ func NewParkingLot(capacity int) *ParkingLot {
 	}
 
 	return &ParkingLot{
-		capacity:          uint32(capacity),
+		capacity:          capacity,
 		availableSlots:    availableSlots,
 		occupiedSlots:     map[int]*Vehicle{},
 		vehicleToSlotMap:  map[string]int{},

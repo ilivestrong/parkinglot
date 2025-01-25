@@ -147,7 +147,7 @@ func (cb *CommandBuilder) ParseCommand(commandName string, args ...string) Comma
 		writeToOutput(cb.owriter, "\nno command provided \n\n")
 		return nil
 	default:
-		writeToOutput(cb.owriter, fmt.Sprintf("\n invalid command: %s, skipping...\n\n", commandName))
+		writeToOutput(cb.owriter, fmt.Sprintf("\ninvalid command: %s, skipping...\n\n", commandName))
 		return nil
 	}
 }

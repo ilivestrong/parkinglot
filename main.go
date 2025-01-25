@@ -15,26 +15,61 @@ import (
 const (
 	ModeInteractive = "interactive"
 	ModeFileBased   = "filebased"
+	CommandExit     = "exit"
 )
 
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
 	defer cancel()
 
-	cmdBuilder := types.NewCommandBuilder(ModeFileBased)
-
-	args := os.Args[1:]
-	if len(args) > 0 {
-		inputFileName := args[0]
-		commands, err := cmdBuilder.BuildCommands(ctx, inputFileName)
-		if err != nil {
-			log.Fatalf("failed to execute commands from input. Error: %v", err)
-		}
-		executeCommands(ctx, commands)
-		return
+	if len(os.Args) > 1 {
+		inputFileName := os.Args[1]
+		runFileBasedMode(ctx, inputFileName)
 	} else {
-		cmdBuilder := types.NewCommandBuilder(ModeInteractive)
-		startInteractiveMode(ctx, cmdBuilder)
+		runInteractiveMode(ctx)
+	}
+}
+
+func runFileBasedMode(ctx context.Context, inputFileName string) {
+	cmdBuilder := types.NewCommandBuilder(ModeFileBased)
+	commands, err := cmdBuilder.BuildCommands(ctx, inputFileName)
+	if err != nil {
+		log.Fatalf("failed to execute commands from input. Error: %v", err)
+	}
+	executeCommands(ctx, commands)
+}
+
+func runInteractiveMode(ctx context.Context) {
+	cmdBuilder := types.NewCommandBuilder(ModeInteractive)
+	reader := bufio.NewReader(os.Stdin)
+
+	parkingLotCreated := false
+	for {
+		input, _ := reader.ReadString('\n')
+		commandName, args := tokenize(input)
+		if commandName == "" {
+			fmt.Println("invalid command.....")
+			continue
+		}
+
+		if strings.ToLower(commandName) == CommandExit {
+			return
+		}
+
+		cmd := cmdBuilder.ParseCommand(commandName, args...)
+		if cmd == nil {
+			continue
+		}
+
+		if commandName == types.TokenForCreateParkingLot {
+			parkingLotCreated = true
+		} else if !parkingLotCreated {
+			fmt.Printf("\nPlease create a parking lot first\n\n")
+			continue
+		}
+
+		cmd.Execute(ctx)
+		fmt.Printf("\n\n")
 	}
 }
 
@@ -44,38 +79,11 @@ func executeCommands(ctx context.Context, commands []types.Commander) {
 	}
 }
 
-func startInteractiveMode(ctx context.Context, cb *types.CommandBuilder) {
-	parkingLotCreated := false
-	reader := bufio.NewReader(os.Stdin)
-
-	for {
-		input, _ := reader.ReadString('\n')
-		tokens := strings.Split(input, " ")
-		if len(tokens) < 1 {
-			fmt.Println("invalid command.....")
-			continue
-		}
-
-		trimmedToken := strings.TrimSpace(tokens[0])
-		if strings.ToLower(trimmedToken) == "exit" {
-			return
-		}
-
-		cmd := cb.ParseCommand(trimmedToken, tokens[1:]...)
-		if cmd == nil {
-			continue
-		}
-
-		if trimmedToken == types.TokenForCreateParkingLot {
-			parkingLotCreated = true
-		}
-
-		if !parkingLotCreated && trimmedToken != types.TokenForCreateParkingLot {
-			fmt.Printf("\ninvalid, please create a parking lot first\n\n")
-			continue
-		}
-
-		cmd.Execute(ctx)
-		fmt.Printf("\n\n")
+func tokenize(input string) (string, []string) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return "", nil
 	}
+	tokens := strings.Fields(input)
+	return tokens[0], tokens[1:]
 }

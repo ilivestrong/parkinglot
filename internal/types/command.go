@@ -31,8 +31,8 @@ var (
 )
 
 var (
-	parkingLot     *ParkingLot
-	tokensWithArgs map[string]struct{} = map[string]struct{}{
+	parkingLot       *ParkingLot
+	commandsWithArgs map[string]struct{} = map[string]struct{}{
 		TokenForCreateParkingLot:            {},
 		TokenForPark:                        {},
 		TokenForLeave:                       {},
@@ -87,31 +87,27 @@ Parses command tokens and their args and returns a concrete Command object.
 
 The returned command object is used to execute the command on-demand.
 */
-func (cb *CommandBuilder) ParseCommand(token string, args ...string) Commander {
-	if token == "" {
-		log.Println("token is missing")
-		return nil
-	}
-	if _, ok := tokensWithArgs[token]; ok && len(args) == 0 {
-		log.Printf("\nargs missing for token: %s", token)
+func (cb *CommandBuilder) ParseCommand(commandName string, args ...string) Commander {
+	if _, ok := commandsWithArgs[commandName]; ok && len(args) == 0 {
+		log.Printf("\nargs missing for command: %s", commandName)
 		return nil
 	}
 
-	switch strings.TrimSpace(token) {
+	switch commandName {
 	case TokenForCreateParkingLot:
-		capacity, err := strconv.Atoi(strings.TrimSpace(args[0]))
+		capacity, err := strconv.Atoi(args[0])
 		if err != nil {
-			log.Printf("\ninvalid args provided for token: %s", token)
+			log.Printf("\ninvalid args provided for command: %s", commandName)
 		}
 		return &CreateParkingLotCommand{
 			capacity: capacity,
 		}
 	case TokenForPark:
 		return &ParkCommand{
-			vehicle: &Vehicle{registrationNumber: strings.TrimSpace(args[0]), color: strings.TrimSpace(args[1])},
+			vehicle: &Vehicle{registrationNumber: args[0], color: args[1]},
 		}
 	case TokenForLeave:
-		slot, _ := strconv.Atoi(strings.TrimSpace(args[0]))
+		slot, _ := strconv.Atoi(args[0])
 		return &LeaveCommand{
 			slot: slot,
 		}
@@ -119,21 +115,21 @@ func (cb *CommandBuilder) ParseCommand(token string, args ...string) Commander {
 		return &StatusCommand{}
 	case TokenForQueryRegistrationNoByColor:
 		return &QueryRegistrationNoByColorCommand{
-			color: strings.TrimSpace(args[0]),
+			color: args[0],
 		}
 	case TokenForQuerySlotNoByRegistrationNo:
 		return &QuerySlotNoByRegistrationNoCommand{
-			registrationNo: strings.TrimSpace(args[0]),
+			registrationNo: args[0],
 		}
 	case TokenForQuerySlotNoByColor:
 		return &QuerySlotNoByColorCommand{
-			color: strings.TrimSpace(args[0]),
+			color: args[0],
 		}
 	case "":
 		fmt.Printf("\nno command provided \n\n")
 		return nil
 	default:
-		fmt.Printf("\n invalid command: %s, skipping...\n\n", strings.TrimSpace(token))
+		fmt.Printf("\n invalid command: %s, skipping...\n\n", commandName)
 		return nil
 	}
 }
@@ -199,7 +195,7 @@ func (cplCmd *CreateParkingLotCommand) Execute(ctx context.Context) (interface{}
 }
 func (parkCmd *ParkCommand) Execute(ctx context.Context) (interface{}, error) {
 	if len(parkingLot.availableSlots) == 0 {
-		fmt.Printf("\nSorry, parking lot is full")
+		fmt.Printf(newlineOrNothing + "Sorry, parking lot is full")
 		return nil, fmt.Errorf("no slots available")
 	}
 
@@ -238,7 +234,7 @@ func (leaveCmd *LeaveCommand) Execute(ctx context.Context) (interface{}, error) 
 	}
 
 	parkingLot.availableSlots = append(parkingLot.availableSlots[:i], append([]int{leaveCmd.slot}, parkingLot.availableSlots[i:]...)...)
-	fmt.Printf("\nSlot number %d is free", leaveCmd.slot)
+	fmt.Printf(newlineOrNothing+"Slot number %d is free", leaveCmd.slot)
 	return nil, nil
 }
 func (statusCmd *StatusCommand) Execute(ctx context.Context) (interface{}, error) {
@@ -249,7 +245,7 @@ func (statusCmd *StatusCommand) Execute(ctx context.Context) (interface{}, error
 
 	sort.Ints(slots)
 
-	fmt.Printf("\n%-10s %-20s %-10s", "Slot No.", "Registration No", "Color")
+	fmt.Printf(newlineOrNothing+"%-10s %-20s %-10s", "Slot No.", "Registration No", "Color")
 	for _, slot := range slots {
 		vehicle := parkingLot.occupiedSlots[slot]
 		fmt.Printf("\n%-10d %-20s %-10s", slot, vehicle.registrationNumber, vehicle.color)
@@ -269,13 +265,13 @@ func (qRegNoByColorCmd *QueryRegistrationNoByColorCommand) Execute(ctx context.C
 		output = append(output, vehicle.registrationNumber)
 	}
 
-	fmt.Printf("\n%s", strings.Join(output, ", "))
+	fmt.Printf(newlineOrNothing+"%s", strings.Join(output, ", "))
 	return nil, nil
 }
 func (qSlotNoByRegNoCmd *QuerySlotNoByRegistrationNoCommand) Execute(ctx context.Context) (interface{}, error) {
 	slot, exists := parkingLot.vehicleToSlotMap[qSlotNoByRegNoCmd.registrationNo]
 	if !exists {
-		fmt.Println("Not found")
+		fmt.Printf("%s", "Not found"+newlineOrNothing)
 		return nil, nil
 	}
 
@@ -285,7 +281,7 @@ func (qSlotNoByRegNoCmd *QuerySlotNoByRegistrationNoCommand) Execute(ctx context
 func (qSlotNoByColorCmd *QuerySlotNoByColorCommand) Execute(ctx context.Context) (interface{}, error) {
 	vehicles, exists := parkingLot.colorToVehicleMap[qSlotNoByColorCmd.color]
 	if !exists {
-		fmt.Println("Not found")
+		fmt.Printf("%s", "Not found"+newlineOrNothing)
 		return nil, nil
 	}
 
@@ -296,6 +292,6 @@ func (qSlotNoByColorCmd *QuerySlotNoByColorCommand) Execute(ctx context.Context)
 		}
 	}
 
-	fmt.Printf("\n%s\n", strings.Join(slots, ", "))
+	fmt.Printf(newlineOrNothing+"%s\n", strings.Join(slots, ", "))
 	return nil, nil
 }
